@@ -478,6 +478,26 @@ make faiss-build
 make os-build
 ```
 
+## 🤔 Por que começar com FAISS e depois migrar para OpenSearch?
+
+### FAISS: Simplicidade e Validação Inicial
+FAISS (Facebook AI Similarity Search) é uma biblioteca leve e eficiente para busca vetorial local. Ele é ideal para a fase inicial do projeto porque:
+- **Validação rápida**: Permite testar embeddings, pipelines e a API sem necessidade de infraestrutura complexa.
+- **Desempenho local**: Funciona diretamente em memória, com alta performance para conjuntos de dados pequenos ou médios.
+- **Simplicidade**: Não requer configuração de servidores ou dependências externas, tornando o desenvolvimento mais ágil.
+
+### OpenSearch: Escalabilidade e Produção
+OpenSearch é uma solução distribuída e escalável, ideal para ambientes de produção. Ele é recomendado quando:
+- **Escalabilidade**: Você precisa lidar com milhões de documentos ou múltiplos usuários simultâneos.
+- **Distribuição**: Suporta clusters distribuídos, com réplicas e alta disponibilidade.
+- **Funcionalidades avançadas**: Oferece suporte a filtros, busca híbrida (BM25 + kNN), e integração com dashboards para análise.
+
+### Estratégia Incremental
+1. **FAISS primeiro**: Comece validando o sistema com dados dummy e FAISS. Isso garante que os embeddings, pipelines e a API estão funcionando corretamente.
+2. **Migre para OpenSearch**: Quando estiver pronto para escalar ou integrar dados reais, altere o backend para OpenSearch no `.env` e siga os passos de configuração.
+
+Essa abordagem incremental reduz a complexidade inicial, permitindo que você foque no desenvolvimento do MVP antes de lidar com a infraestrutura distribuída. Assim, você valida o sistema localmente com FAISS e, quando necessário, escala para OpenSearch sem refazer o trabalho.
+
 ## 📄 Licença
 
 MIT License - veja LICENSE para detalhes.
