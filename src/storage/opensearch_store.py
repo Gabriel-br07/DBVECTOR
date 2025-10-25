@@ -4,9 +4,9 @@ Store OpenSearch para busca vetorial distribuída.
 import json
 import numpy as np
 from typing import List, Dict, Any
-from opensearch_py import OpenSearch
-from opensearch_py.helpers import bulk
-from opensearch_py.exceptions import RequestError
+from opensearchpy import OpenSearch
+from opensearchpy.helpers import bulk
+from opensearchpy.exceptions import RequestError
 
 from src.storage.base import VectorStore  
 from src.schema import Doc, SearchResult

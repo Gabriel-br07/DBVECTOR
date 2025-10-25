@@ -11,14 +11,16 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from src.storage.factory import get_store
+from src.storage.factory import get_store, get_faiss_store
+from src.storage.faiss_store import FAISSStore
 from src import embeddings, config
 from src.schema import SearchResponse, SearchResult
 
 
 # Modelos Pydantic para API
 class SearchRequest(BaseModel):
-    q: str = Field(..., description="Texto da consulta jurídica")
+    # exige string não vazia
+    q: str = Field(..., min_length=1, description="Texto da consulta jurídica")
     k: int = Field(5, ge=1, le=20, description="Número de resultados (1-20)")
 
 
@@ -124,6 +126,10 @@ async def search_documents(request: SearchRequest):
     if store is None:
         raise HTTPException(status_code=503, detail="Store não inicializado")
     
+    # Verifica se query é vazia (após strip) — garante validação adicional
+    if not request.q or not request.q.strip():
+        raise HTTPException(status_code=422, detail="Query não pode ser vazia")
+
     # Verifica se há documentos
     doc_count = store.get_doc_count()
     if doc_count == 0:
@@ -136,9 +142,9 @@ async def search_documents(request: SearchRequest):
         # Gera embedding da query
         query_vector = embeddings.encode_single_text(request.q)
         
-        # Busca documentos
+        # Busca documentos usando store global
         results = store.search(query_vector, k=request.k)
-        
+
         # Converte para modelo API
         api_results = []
         for result in results:

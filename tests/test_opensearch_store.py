@@ -4,8 +4,8 @@ Estes testes são executados apenas se OpenSearch estiver disponível.
 """
 import pytest
 import requests
-from opensearch_py import OpenSearch
-from opensearch_py.exceptions import ConnectionError
+from opensearchpy import OpenSearch
+from opensearchpy.exceptions import ConnectionError
 
 from src import config
 from src.storage.opensearch_store import OpenSearchStore

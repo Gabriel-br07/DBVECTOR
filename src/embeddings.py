@@ -34,6 +34,11 @@ def encode_texts(texts: List[str]) -> np.ndarray:
     """
     model = load_model()
     
+    # Caso especial: lista vazia -> retorna array 2D (0, dim)
+    if not texts:
+        dim = get_embedding_dimension()
+        return np.zeros((0, dim), dtype=np.float32)
+
     # Gera embeddings
     embeddings = model.encode(
         texts,
@@ -41,9 +46,14 @@ def encode_texts(texts: List[str]) -> np.ndarray:
         show_progress_bar=len(texts) > 10,
         convert_to_numpy=True
     )
-    
+
+    # Alguns modelos retornam vetor 1D quando len(texts)==1; garante 2D
+    arr = np.array(embeddings)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+
     # Garante tipo float32 para compatibilidade FAISS
-    return embeddings.astype(np.float32)
+    return arr.astype(np.float32)
 
 
 def encode_single_text(text: str) -> np.ndarray:

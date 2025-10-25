@@ -17,9 +17,10 @@ class FAISSStore(VectorStore):
     """Store FAISS com persistência local."""
     
     def __init__(self, index_path: str = None, metadata_path: str = None):
-        self.index_path = index_path or config.FAISS_INDEX_PATH
-        self.metadata_path = metadata_path or config.FAISS_METADATA_PATH
-        self.index = None
+        # Permite sobrescrever via variáveis de ambiente em tempo de execução
+        self.index_path = index_path or os.getenv("FAISS_INDEX_PATH", config.FAISS_INDEX_PATH)
+        self.metadata_path = metadata_path or os.getenv("FAISS_METADATA_PATH", config.FAISS_METADATA_PATH)
+        self._index = None
         self.metadata = {}
         
         # Cria diretórios se necessário
@@ -38,8 +39,8 @@ class FAISSStore(VectorStore):
         
         if os.path.exists(index_file):
             print(f"📁 Carregando índice FAISS: {index_file}")
-            self.index = faiss.read_index(index_file)
-            
+            self._index = faiss.read_index(index_file)
+
             # Carrega metadados
             if os.path.exists(self.metadata_path):
                 df = pd.read_parquet(self.metadata_path)
@@ -52,13 +53,13 @@ class FAISSStore(VectorStore):
     
     def _save_index(self) -> None:
         """Salva índice FAISS e metadados no disco."""
-        if self.index is None:
+        if self._index is None:
             return
             
         index_file = self._get_index_file()
         print(f"💾 Salvando índice FAISS: {index_file}")
-        faiss.write_index(self.index, index_file)
-        
+        faiss.write_index(self._index, index_file)
+
         # Salva metadados
         if self.metadata:
             df = pd.DataFrame.from_dict(self.metadata, orient='index')
@@ -83,15 +84,15 @@ class FAISSStore(VectorStore):
         vectors = embeddings.encode_texts(texts)
         
         # Cria índice se não existir
-        if self.index is None:
+        if self._index is None:
             dimension = vectors.shape[1]
             print(f"📊 Criando índice FAISS com dimensão {dimension}")
             
             # Usa IndexFlatIP para busca por produto interno (cosseno se normalizado)
             base_index = faiss.IndexFlatIP(dimension)
             # Usa IndexIDMap2 para manter mapeamento de IDs
-            self.index = faiss.IndexIDMap2(base_index)
-        
+            self._index = faiss.IndexIDMap2(base_index)
+
         # Prepara IDs internos e metadados
         internal_ids = []
         for doc in docs:
@@ -111,15 +112,15 @@ class FAISSStore(VectorStore):
             }
         
         # Adiciona ao índice
-        self.index.add_with_ids(vectors, np.array(internal_ids, dtype=np.int64))
-        
+        self._index.add_with_ids(vectors, np.array(internal_ids, dtype=np.int64))
+
         # Salva no disco
         self._save_index()
         print(f"✅ {len(docs)} documentos indexados com sucesso!")
     
     def search(self, query_vector: np.ndarray, k: int = 5) -> List[SearchResult]:
         """Busca documentos similares."""
-        if self.index is None or self.index.ntotal == 0:
+        if self._index is None or self._index.ntotal == 0:
             print("⚠️ Índice vazio ou não inicializado")
             return []
         
@@ -128,8 +129,8 @@ class FAISSStore(VectorStore):
             query_vector = query_vector.reshape(1, -1)
         
         # Busca no FAISS
-        scores, internal_ids = self.index.search(query_vector, k)
-        
+        scores, internal_ids = self._index.search(query_vector, k)
+
         results = []
         for score, internal_id in zip(scores[0], internal_ids[0]):
             if internal_id == -1:  # ID inválido
@@ -153,6 +154,6 @@ class FAISSStore(VectorStore):
     
     def get_doc_count(self) -> int:
         """Retorna número de documentos indexados."""
-        if self.index is None:
+        if self._index is None:
             return 0
-        return self.index.ntotal
+        return self._index.ntotal
