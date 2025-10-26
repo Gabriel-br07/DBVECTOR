@@ -18,7 +18,7 @@ def main():
     # Carrega documentos dummy
     docs = get_dummy_docs()
     print(f"📄 Carregados {len(docs)} documentos dummy")
-    
+
     # Cria store FAISS
     store = get_faiss_store()
     

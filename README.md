@@ -175,6 +175,7 @@ make api
 | `make shell` | Ativa ambiente virtual Poetry |
 | `make format` | Formata código (black + isort) |
 | `make lint` | Verifica formatação e estilo |
+| `make data-merge` | Consolida dados JSON/JSONL |
 | `make faiss-build` | Indexa docs no FAISS |
 | `make faiss-query` | Busca no FAISS |
 | `make os-up` | Inicia OpenSearch (Docker) |
@@ -228,6 +229,47 @@ O projeto inclui 5 documentos jurídicos dummy para validação:
 3. **Código Civil Art. 197** - Prescrição entre cônjuges  
 4. **Código Civil Art. 178** - Decadência de negócios jurídicos
 5. **STJ REsp 987.654** - Responsabilidade do consumidor
+
+### 🧹 Consolidar dados para indexação
+
+Para preparar dados reais para indexação, o projeto inclui um utilitário que consolida arquivos `.json` e `.jsonl` recursivamente, remove registros com `cluster_name == "unknown"` e gera um único arquivo JSONL limpo:
+
+```bash
+# Uso básico (via Makefile)
+make data-merge
+
+# Ou diretamente com Poetry
+poetry run python -m src.tools.tratamento_dados \
+  --input data \
+  --output data/merged_clean.jsonl \
+  --dedupe-by id
+
+# Opções avançadas
+poetry run python -m src.tools.tratamento_dados \
+  --input data/raw \
+  --output data/processed/clean.jsonl \
+  --dedupe-by hash \
+  --ignore-hidden \
+  --quiet
+```
+
+**Parâmetros disponíveis:**
+- `--input, -i`: Diretório raiz para varredura (default: `data`)
+- `--output, -o`: Arquivo de saída JSONL (default: `data/merged_clean.jsonl`)
+- `--dedupe-by`: Estratégia de deduplicação - `id`, `hash`, ou `none` (default: `id`)
+- `--ignore-hidden`: Ignora arquivos e pastas iniciados por `.` (default: ativo)
+- `--extensions`: Extensões de arquivo, separadas por vírgula (default: `.json,.jsonl`)
+- `--quiet`: Reduz verbosidade (apenas avisos e erros)
+- `--stats`: Imprime estatísticas finais em JSON
+
+**O que o utilitário faz:**
+- ✅ Varre recursivamente o diretório de entrada
+- ✅ Processa arquivos `.json` (lista ou objeto único) e `.jsonl` (linha a linha)
+- ✅ Filtra registros onde `cluster_name` seja `"unknown"` (case-insensitive)
+- ✅ Remove duplicados baseado em `id` ou `hash` (configurable)
+- ✅ Valida que registros sejam objetos JSON válidos
+- ✅ Gera saída JSONL pronta para indexação
+- ✅ Logging detalhado com estatísticas de processamento
 
 ## 🔧 Como Plugar JSONs Reais
 

@@ -1,5 +1,5 @@
 .PHONY: install install-dev clean shell add add-dev update format lint demo
-.PHONY: faiss-build faiss-query os-up os-down os-logs os-build os-query api test test-cov
+.PHONY: faiss-build faiss-query os-up os-down os-logs os-build os-query api test test-cov data-merge
 
 # Instalação
 install:
@@ -87,3 +87,7 @@ setup-opensearch: install os-up
 # Demo rápido
 demo:
 	poetry run python demo.py
+
+# Consolidação de dados
+data-merge:
+	poetry run python -m src.tools.tratamento_dados --input data --output data/merged_clean.jsonl --dedupe-by id
