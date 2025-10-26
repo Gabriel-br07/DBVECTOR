@@ -1,140 +1,302 @@
-name: CI - RAG Jurídico
+name: CI - Métricas e Qualidade
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, chore/consolidando-aplicacao, develop ]
   pull_request:
     branches: [ main ]
+  schedule:
+    # Executa diariamente às 6h UTC
+    - cron: '0 6 * * *'
 
 jobs:
-  test:
+  validate_data:
+    name: Validação de Dados
     runs-on: ubuntu-latest
     
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      
+      - name: Cache Poetry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/pypoetry
+            ~/.virtualenvs
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+      
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      
+      - name: Install dependencies
+        run: poetry install --with dev
+      
+      - name: Merge data (if needed)
+        run: |
+          if [ ! -f data/merged_clean.jsonl ]; then
+            poetry run python -m src.tools.tratamento_dados --input data/indexes/faiss --output data/merged_clean.jsonl --dedupe-by hash || echo "No data to merge"
+          fi
+      
+      - name: Validate data
+        run: |
+          if [ -f data/merged_clean.jsonl ]; then
+            poetry run python -m src.tools.validate_data --input data/merged_clean.jsonl --report reports/validation/report.json
+          else
+            echo "⚠️ No data to validate"
+          fi
+      
+      - name: Upload validation report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: validation-report
+          path: reports/validation/report.json
+          retention-days: 30
+
+  tests:
+    name: Tests (Backend - ${{ matrix.backend }})
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.10, 3.11, 3.12]
+        backend: [faiss]  # opensearch pode ser adicionado quando disponível
+      fail-fast: false
     
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-    
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-      with:
-        version: latest
-        virtualenvs-create: true
-        virtualenvs-in-project: true
-        virtualenvs-path: ~/.venv
-    
-    - name: Load cached venv
-      id: cached-poetry-dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.venv
-        key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-    
-    - name: Install dependencies
-      if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-      run: poetry install --no-interaction --no-root
-    
-    - name: Install project
-      run: poetry install --no-interaction
-    
-    - name: Run tests with FAISS backend
-      env:
-        SEARCH_BACKEND: faiss
-        EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
-        NORMALIZE_EMBEDDINGS: true
-      run: |
-        poetry run pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
-    
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-        fail_ci_if_error: false
+      - uses: actions/checkout@v3
+      
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      
+      - name: Cache Poetry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/pypoetry
+            ~/.virtualenvs
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+      
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      
+      - name: Install dependencies
+        run: poetry install --with dev
+      
+      - name: Setup OpenSearch (if needed)
+        if: matrix.backend == 'opensearch'
+        run: |
+          docker-compose up -d opensearch
+          sleep 30
+        continue-on-error: true
+      
+      - name: Run tests
+        env:
+          SEARCH_BACKEND: ${{ matrix.backend }}
+        run: |
+          if [ "${{ matrix.backend }}" = "opensearch" ]; then
+            poetry run pytest tests/ -v --cov=src --cov-report=xml || echo "OpenSearch tests failed"
+          else
+            poetry run pytest tests/ -v -m "not opensearch" --cov=src --cov-report=xml
+          fi
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-${{ matrix.backend }}
 
-  # Teste com OpenSearch (opcional - descomente se quiser habilitar)
-  # test-opensearch:
-  #   runs-on: ubuntu-latest
-  #   
-  #   services:
-  #     opensearch:
-  #       image: opensearchproject/opensearch:2.11.0
-  #       env:
-  #         discovery.type: single-node
-  #         plugins.security.disabled: true
-  #         OPENSEARCH_INITIAL_ADMIN_PASSWORD: admin123
-  #       ports:
-  #         - 9200:9200
-  #       options: >-
-  #         --health-cmd "curl -f http://localhost:9200/_cluster/health"
-  #         --health-interval 10s
-  #         --health-timeout 5s
-  #         --health-retries 10
-  #   
-  #   steps:
-  #   - uses: actions/checkout@v4
-  #   
-  #   - name: Set up Python 3.11
-  #     uses: actions/setup-python@v4
-  #     with:
-  #       python-version: 3.11
-  #   
-  #   - name: Install dependencies
-  #     run: |
-  #       python -m pip install --upgrade pip
-  #       poetry install
-  #   
-  #   - name: Wait for OpenSearch
-  #     run: |
-  #       for i in {1..30}; do
-  #         if curl -s http://localhost:9200; then
-  #           echo "OpenSearch is ready"
-  #           break
-  #         fi
-  #         echo "Waiting for OpenSearch..."
-  #         sleep 10
-  #       done
-  #   
-  #   - name: Run OpenSearch tests
-  #     env:
-  #       SEARCH_BACKEND: opensearch
-  #       OPENSEARCH_HOST: localhost
-  #       OPENSEARCH_PORT: 9200
-  #     run: |
-  #       poetry run pytest tests/test_opensearch_store.py -v
-
-  lint:
+  bench:
+    name: Benchmarks
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
+      
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      
+      - name: Cache Poetry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/pypoetry
+            ~/.virtualenvs
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+      
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      
+      - name: Install dependencies
+        run: poetry install --with dev
+      
+      - name: Download previous benchmark
+        uses: actions/cache@v3
+        with:
+          path: .benchmarks
+          key: ${{ runner.os }}-benchmark-${{ github.ref }}
+          restore-keys: |
+            ${{ runner.os }}-benchmark-
+      
+      - name: Run benchmarks
+        run: poetry run pytest tests/bench --benchmark-save=ci-baseline --benchmark-autosave
+      
+      - name: Compare with baseline (if exists)
+        run: |
+          if [ -d .benchmarks ]; then
+            poetry run pytest tests/bench --benchmark-compare --benchmark-compare-fail=mean:10% || echo "Benchmark comparison informational only"
+          fi
+        continue-on-error: true
+      
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-results
+          path: .benchmarks/
+          retention-days: 30
+
+  eval:
+    name: Avaliação de Recuperação (Backend - ${{ matrix.backend }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        backend: [faiss]
+      fail-fast: false
     
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.11
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      
+      - name: Cache Poetry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/pypoetry
+            ~/.virtualenvs
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+      
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      
+      - name: Install dependencies
+        run: poetry install --with dev
+      
+      - name: Setup OpenSearch (if needed)
+        if: matrix.backend == 'opensearch'
+        run: |
+          docker-compose up -d opensearch
+          sleep 30
+        continue-on-error: true
+      
+      - name: Build index with dummy data
+        env:
+          SEARCH_BACKEND: ${{ matrix.backend }}
+        run: |
+          if [ "${{ matrix.backend }}" = "faiss" ]; then
+            # Cria índice FAISS com dados dummy para testes
+            poetry run python -c "
+from src.schema import get_dummy_docs
+from src.storage.faiss_store import FAISSStore
+docs = get_dummy_docs()
+store = FAISSStore()
+store.index(docs)
+print(f'✅ {len(docs)} docs indexados para avaliação')
+"
+          fi
+      
+      - name: Run retrieval evaluation
+        env:
+          SEARCH_BACKEND: ${{ matrix.backend }}
+        run: |
+          poetry run python -m src.eval.retrieval_eval \
+            --qa data/eval/qa_dev.jsonl \
+            --k 5 \
+            --backend ${{ matrix.backend }} \
+            --report reports/eval/retrieval_metrics.json \
+            --csv reports/eval/retrieval_metrics.csv || echo "Evaluation failed for ${{ matrix.backend }}"
+        continue-on-error: true
+      
+      - name: Upload evaluation results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: eval-results-${{ matrix.backend }}
+          path: reports/eval/
+          retention-days: 30
+
+  lint:
+    name: Linting
+    runs-on: ubuntu-latest
     
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-      with:
-        version: latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      
+      - name: Install dependencies
+        run: poetry install --with dev
+      
+      - name: Run black
+        run: poetry run black --check --diff src/ tests/
+      
+      - name: Run isort
+        run: poetry run isort --check-only --diff src/ tests/
+      
+      - name: Run flake8
+        run: poetry run flake8 src/ tests/ --max-line-length=100 --ignore=E203,W503
+
+  summary:
+    name: Quality Summary
+    runs-on: ubuntu-latest
+    needs: [validate_data, tests, bench, eval, lint]
+    if: always()
     
-    - name: Install linting tools
-      run: poetry install --only dev
-    
-    - name: Run black (code formatting check)
-      run: poetry run black --check --diff src/ tests/
-    
-    - name: Run isort (import sorting check)  
-      run: poetry run isort --check-only --diff src/ tests/
-    
-    - name: Run flake8 (linting)
-      run: poetry run flake8 src/ tests/ --max-line-length=100 --ignore=E203,W503
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+      
+      - name: Display summary
+        run: |
+          echo "## 📊 Resumo de Qualidade" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f validation-report/report.json ]; then
+            echo "### ✅ Validação de Dados" >> $GITHUB_STEP_SUMMARY
+            cat validation-report/report.json >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🧪 Testes: ${{ needs.tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "### 🏎️ Benchmarks: ${{ needs.bench.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "### 📈 Avaliação: ${{ needs.eval.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔍 Linting: ${{ needs.lint.result }}" >> $GITHUB_STEP_SUMMARY

@@ -1,5 +1,6 @@
 .PHONY: install install-dev clean shell add add-dev update format lint demo
 .PHONY: faiss-build faiss-query os-up os-down os-logs os-build os-query api test test-cov data-merge
+.PHONY: data-validate bench bench-compare eval eval-opensearch inspect-emb quality
 
 # Instalação
 install:
@@ -88,6 +89,32 @@ setup-opensearch: install os-up
 demo:
 	poetry run python demo.py
 
-# Consolidação de dados
+# Tratando os dados
 data-merge:
-	poetry run python -m src.tools.tratamento_dados --input data --output data/merged_clean.jsonl --dedupe-by id
+	poetry run python -m src.tools.tratamento_dados --input data/indexes/faiss --output data/merged_clean.jsonl --dedupe-by case_number
+
+# Validação de dados
+data-validate:
+	poetry run python -m src.tools.validate_data --input data/merged_clean.jsonl --report reports/validation/report.json
+
+# Benchmarks
+bench:
+	poetry run pytest tests/bench --benchmark-save=baseline
+
+bench-compare:
+	poetry run pytest tests/bench --benchmark-compare
+
+# Avaliação de recuperação
+eval:
+	poetry run python -m src.eval.retrieval_eval --qa data/eval/qa_dev.jsonl --k 5 --backend faiss --report reports/eval/retrieval_metrics.json --csv reports/eval/retrieval_metrics.csv
+
+eval-opensearch:
+	poetry run python -m src.eval.retrieval_eval --qa data/eval/qa_dev.jsonl --k 5 --backend opensearch --report reports/eval/retrieval_metrics_os.json --csv reports/eval/retrieval_metrics_os.csv
+
+# Inspeção de embeddings
+inspect-emb:
+	poetry run python -m src.eval.inspect_embeddings --input data/merged_clean.jsonl --mode generate --report reports/inspect/embeddings_summary.json
+
+# Workflow completo de qualidade
+quality: data-validate bench eval inspect-emb
+	@echo "✅ Todas as verificações de qualidade concluídas!"

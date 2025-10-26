@@ -11,6 +11,7 @@ import json
 import logging
 import sys
 import hashlib
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Set, Optional, Tuple
 
@@ -42,6 +43,15 @@ class DataProcessor:
         self.ignore_hidden = ignore_hidden
         self.extensions = extensions or [".json", ".jsonl"]
         self.quiet = quiet
+
+        # Regex para limpeza de tokens ruins / HTML
+        # Remove HTML tags, common HTML entities (&nbsp;), and standalone 'br' tokens
+        self._re_html = re.compile(r"<[^>]+>", flags=re.IGNORECASE)
+        self._re_html_entities = re.compile(r"&(nbsp|amp|lt|gt);", flags=re.IGNORECASE)
+        # standalone 'br' token (word boundary) appears frequently as separator in scraped text
+        self._re_bad_br = re.compile(r"\bbr\b", flags=re.IGNORECASE)
+        # collapse multiple whitespace into single space/newline
+        self._re_multi_space = re.compile(r"[\t\u00A0\s]+")
 
         # Estatísticas
         self.stats = {
@@ -105,6 +115,17 @@ class DataProcessor:
             ).hexdigest()
         else:
             key_str = str(key_value)
+
+        # Normalização especial para case_number: remove "despacho" e mantém só números
+        if key_field == "case_number":
+            # Remove "despacho" (case-insensitive)
+            key_str = re.sub(r'\bdespacho\b', '', key_str, flags=re.IGNORECASE)
+            # Mantém apenas dígitos
+            key_str = re.sub(r'[^\d]', '', key_str)
+            if not key_str:
+                # Se não sobrou nenhum número, não deduplica
+                logger.debug(f"case_number without digits after normalization, skipping deduplication")
+                return False
 
         if key_str in self.seen_keys:
             return True
@@ -196,10 +217,62 @@ class DataProcessor:
             self.stats["duplicates_removed"] += 1
             return False
 
+        # Limpeza de campos textuais antes de escrever
+        self.clean_text_fields(record)
+
         # Escrever registro
         self.write_record(record)
         self.stats["records_written"] += 1
         return True
+
+    def clean_text_fields(self, record: Dict[str, Any]) -> None:
+        """Limpa campos textuais comuns no registro removendo tokens ruins.
+
+        - Remove tags HTML
+        - Remove entidades HTML básicas (&nbsp;, &amp;, etc.)
+        - Remove tokens isolados 'br' (usados como quebras) e os substitui por espaço
+        - Normaliza espaços em branco
+        - Limpa case_number removendo "despacho" e mantendo apenas números
+        A função modifica o dicionário in-place.
+        """
+        text_fields = [
+            "content",
+            "text",
+            "body",
+            "conteudo",
+            "resumo",
+            "summary",
+            "title",
+        ]
+
+        for field in text_fields:
+            if field in record and isinstance(record[field], str):
+                text = record[field]
+
+                # remover tags HTML
+                text = self._re_html.sub(" ", text)
+
+                # remover entidades HTML simples
+                text = self._re_html_entities.sub(" ", text)
+
+                # remover token 'br' isolado (muitas fontes usam 'br' como separador)
+                text = self._re_bad_br.sub(" ", text)
+
+                # colapsar espaços e normalizar
+                text = self._re_multi_space.sub(" ", text).strip()
+
+                # atualizar campo
+                record[field] = text
+
+        # Limpar case_number: remover "despacho" e manter apenas números
+        if "case_number" in record and isinstance(record["case_number"], str):
+            case_num = record["case_number"]
+            # Remove "despacho" (case-insensitive) e mantém apenas dígitos
+            case_num = re.sub(r'\bdespacho\b', '', case_num, flags=re.IGNORECASE)
+            # Extrai apenas números
+            case_num = re.sub(r'[^\d]', '', case_num)
+            if case_num:
+                record["case_number"] = case_num
 
     def write_record(self, record: Dict[str, Any]) -> None:
         """Escreve um registro no arquivo de saída (JSONL)."""
@@ -338,9 +411,8 @@ Exemplos:
     parser.add_argument(
         "--dedupe-by",
         type=str,
-        choices=["id", "hash", "none"],
         default="id",
-        help="Estratégia de deduplicação (default: id)",
+        help="Campo para deduplicação: 'id', 'hash', 'none', ou qualquer nome de campo (ex: case_number) (default: id)",
     )
 
     parser.add_argument(

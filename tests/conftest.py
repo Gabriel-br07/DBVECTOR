@@ -6,9 +6,23 @@ import tempfile
 import pytest
 from typing import List
 import numpy as np
+from fastapi.testclient import TestClient
 
 from src.schema import Doc, get_dummy_docs
-from src import embeddings
+from src import embeddings, config
+
+
+@pytest.fixture
+def search_backend():
+    """Fixture que retorna backend de busca configurado."""
+    return os.getenv("SEARCH_BACKEND", config.SEARCH_BACKEND)
+
+
+@pytest.fixture
+def client():
+    """Fixture com TestClient da API FastAPI."""
+    from src.api.main import app
+    return TestClient(app)
 
 
 @pytest.fixture
@@ -61,3 +75,33 @@ def opensearch_test_index():
 def query_vector() -> np.ndarray:
     """Fixture com vetor de query para testes."""
     return embeddings.encode_single_text("direitos fundamentais constitucionais")
+
+
+def pytest_configure(config):
+    """Configura markers customizados."""
+    config.addinivalue_line(
+        "markers", "opensearch: marca testes que requerem OpenSearch disponível"
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """
+    Marca automaticamente para skip testes OpenSearch se container não disponível.
+    """
+    # Verifica se OpenSearch está disponível
+    try:
+        from opensearchpy import OpenSearch
+        from src.config import get_opensearch_config
+        
+        os_config = get_opensearch_config()
+        client = OpenSearch(**os_config, timeout=2)
+        client.info()
+        opensearch_available = True
+    except Exception:
+        opensearch_available = False
+    
+    # Aplica skip aos testes marcados como opensearch
+    skip_opensearch = pytest.mark.skip(reason="OpenSearch não disponível")
+    for item in items:
+        if "opensearch" in item.keywords and not opensearch_available:
+            item.add_marker(skip_opensearch)

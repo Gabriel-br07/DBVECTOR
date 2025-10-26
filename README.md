@@ -176,6 +176,7 @@ make api
 | `make format` | Formata código (black + isort) |
 | `make lint` | Verifica formatação e estilo |
 | `make data-merge` | Consolida dados JSON/JSONL |
+| `make data-validate` | Valida qualidade dos dados |
 | `make faiss-build` | Indexa docs no FAISS |
 | `make faiss-query` | Busca no FAISS |
 | `make os-up` | Inicia OpenSearch (Docker) |
@@ -185,6 +186,12 @@ make api
 | `make api` | Inicia API FastAPI |
 | `make test` | Executa todos os testes |
 | `make test-cov` | Testes com cobertura |
+| `make bench` | Executa benchmarks |
+| `make bench-compare` | Compara com baseline |
+| `make eval` | Avalia recuperação (FAISS) |
+| `make eval-opensearch` | Avalia recuperação (OpenSearch) |
+| `make inspect-emb` | Inspeciona embeddings |
+| `make quality` | Workflow completo de qualidade |
 | `make demo` | Script de demonstração |
 
 ## 🧪 Testes
@@ -229,6 +236,275 @@ O projeto inclui 5 documentos jurídicos dummy para validação:
 3. **Código Civil Art. 197** - Prescrição entre cônjuges  
 4. **Código Civil Art. 178** - Decadência de negócios jurídicos
 5. **STJ REsp 987.654** - Responsabilidade do consumidor
+
+## 📈 Métricas & Qualidade
+
+O projeto inclui um **pacote completo de validação, testes, benchmarks, avaliação e monitoramento** para garantir qualidade e performance.
+
+### 1. Validação de Dados
+
+Valida qualidade dos dados antes da indexação, medindo:
+- % documentos com campos ausentes
+- % documentos com texto muito curto
+- % documentos com tokens HTML/residuais
+- IDs duplicados
+- % total de problemas
+
+**Uso:**
+```bash
+# Via Makefile
+make data-validate
+
+# Ou diretamente
+poetry run python -m src.tools.validate_data \
+  --input data/merged_clean.jsonl \
+  --min-chars 200 \
+  --max-bad-pct 10 \
+  --report reports/validation/report.json
+```
+
+**Exemplo de relatório:**
+```json
+{
+  "total": 1000,
+  "missing_fields_pct": 1.2,
+  "too_short_pct": 3.4,
+  "bad_tokens_pct": 5.0,
+  "dupe_ids": 12,
+  "bad_overall_pct": 8.1,
+  "ok_to_proceed": true
+}
+```
+
+**Gating:** Falha automaticamente se `bad_overall_pct > max-bad-pct` (default: 10%).
+
+### 2. Testes Unitários e Funcionais
+
+Além dos testes existentes, agora incluem:
+
+```bash
+# Todos os testes
+poetry run pytest -v
+
+# Testes sem OpenSearch (skip automático se não disponível)
+poetry run pytest -m "not opensearch" -v
+
+# Com cobertura
+poetry run pytest --cov=src --cov-report=html
+```
+
+**Novos testes:**
+- `test_api_search.py` - Contrato da API /search
+- `test_dedupe_and_ids.py` - Deduplicação e mapeamento de IDs
+- `test_io_pipelines.py` - Ingestão e round-trip de JSON/JSONL
+- `test_validate_data.py` - Validação de dados
+
+### 3. Benchmarks de Performance
+
+Usa `pytest-benchmark` para medir latência e throughput:
+
+**Latência de queries:**
+```bash
+# Executar e salvar baseline
+make bench
+# ou: poetry run pytest tests/bench --benchmark-save=baseline
+
+# Comparar com baseline
+make bench-compare
+# ou: poetry run pytest tests/bench --benchmark-compare
+```
+
+**Métricas:**
+- **P95 de latência** de `/search` (SLO: 200ms)
+- **Tempo de build** de índice FAISS (SLO: 60s)
+- **Throughput** de queries (mín: 10 QPS)
+
+**Exemplo de saída:**
+```
+📊 Latência k=5:
+   Mean: 45.23ms
+   Median: 42.10ms
+   P95 (approx): 68.45ms
+   SLO: 200ms
+✅ SLO atendido
+```
+
+### 4. Avaliação de Recuperação
+
+Mede qualidade da recuperação usando dataset de Q&A com ground-truth:
+
+```bash
+# FAISS
+make eval
+# ou: poetry run python -m src.eval.retrieval_eval \
+#   --qa data/eval/qa_dev.jsonl \
+#   --k 5 \
+#   --backend faiss \
+#   --report reports/eval/retrieval_metrics.json \
+#   --csv reports/eval/retrieval_metrics.csv
+
+# OpenSearch
+make eval-opensearch
+```
+
+**Métricas calculadas:**
+- **Precision@K**: % de docs relevantes nos top-K
+- **Recall@K**: % de docs relevantes recuperados
+- **MRR (Mean Reciprocal Rank)**: Posição do primeiro doc relevante
+- **nDCG@K**: Normalized Discounted Cumulative Gain
+
+**Thresholds (configuráveis via .env):**
+- `MIN_P5=0.55` - Precision@5 mínima
+- `MIN_NDCG5=0.70` - nDCG@5 mínimo
+
+**Exemplo de relatório:**
+```
+📈 Resultados:
+   Queries avaliadas: 20
+   K: 5
+
+   Precision@5: 0.6200
+   Recall@5: 0.7800
+   MRR: 0.8500
+   nDCG@5: 0.7650
+
+✅ Avaliação aprovada!
+```
+
+**Dataset de avaliação:**
+- `data/eval/qa_dev.jsonl` - 20 pares de pergunta/docs relevantes
+- Cobre casos dos documentos dummy
+
+### 5. Inspeção de Embeddings
+
+Detecta problemas nos vetores (NaNs, colapso, duplicatas):
+
+```bash
+# Gera embeddings e inspeciona
+make inspect-emb
+# ou: poetry run python -m src.eval.inspect_embeddings \
+#   --input data/merged_clean.jsonl \
+#   --mode generate \
+#   --report reports/inspect/embeddings_summary.json
+```
+
+**Detecções:**
+- **NaN/Inf**: Vetores inválidos
+- **Colapso**: Vetores com norma L2 muito baixa (< 0.1)
+- **Near-duplicates**: Pares com similaridade cosine ≥ 0.995
+
+**Exemplo de relatório:**
+```
+📈 Resultados:
+   Vetores: 1000
+   Dimensão: 384 (esperado: 384)
+
+🔬 Validação:
+   Dimensão OK: True
+   NaN: 0 ✅
+   Inf: 0 ✅
+
+📏 Norma L2:
+   Média: 0.9845
+   P5: 0.9512
+   P95: 1.0234
+   Colapsados: 0 (0.00%)
+
+🔁 Near-Duplicates:
+   Count: 8
+   %: 0.0800%
+
+✅ Inspeção aprovada!
+```
+
+**Gating:** Falha se NaNs > 0 ou near-duplicates > `NEAR_DUPES_MAX_PCT` (default: 1%).
+
+### 6. Workflow Completo de Qualidade
+
+Execute todas as verificações de uma vez:
+
+```bash
+make quality
+# Executa: data-validate + bench + eval + inspect-emb
+```
+
+### 7. Configuração de Thresholds
+
+Adicione ao `.env`:
+
+```bash
+# Validação de Dados
+MIN_CHARS=200
+VALIDATION_MAX_BAD_PCT=10
+
+# SLOs e Benchmarks
+SLO_P95_MS=200
+MAX_BUILD_TIME_S=60
+
+# Thresholds de Avaliação de Recuperação
+MIN_P5=0.55
+MIN_NDCG5=0.70
+
+# Inspeção de Embeddings
+NEAR_DUPES_MAX_PCT=1
+```
+
+### 8. CI/CD com GitHub Actions
+
+O workflow `.github/workflows/ci.yml` executa automaticamente:
+
+**Jobs:**
+1. **validate_data** - Valida qualidade dos dados
+2. **tests** - Executa testes unitários e funcionais
+3. **bench** - Mede performance e compara com baseline
+4. **eval** - Avalia métricas de recuperação
+5. **lint** - Verifica formatação do código
+
+**Triggers:**
+- Push em `main` e branches de desenvolvimento
+- Pull requests
+- Diariamente às 6h UTC (cron)
+
+**Artifacts:**
+- Relatórios de validação
+- Resultados de benchmarks
+- Métricas de avaliação
+- Cobertura de código
+
+**Exemplo de uso:**
+```bash
+# Localmente antes de commit
+make quality
+poetry run pytest -v
+
+# CI executa automaticamente no push
+git push origin feature/nova-funcionalidade
+```
+
+### 9. Estrutura de Relatórios
+
+```
+reports/
+├── validation/
+│   └── report.json          # Métricas de qualidade de dados
+├── eval/
+│   ├── retrieval_metrics.json    # Métricas agregadas
+│   └── retrieval_metrics.csv     # Detalhes por query
+└── inspect/
+    └── embeddings_summary.json   # Saúde dos embeddings
+```
+
+### 10. Comandos Makefile de Qualidade
+
+| Comando | Descrição |
+|---------|-----------|
+| `make data-validate` | Valida qualidade dos dados |
+| `make bench` | Executa benchmarks e salva baseline |
+| `make bench-compare` | Compara com baseline anterior |
+| `make eval` | Avalia métricas de recuperação (FAISS) |
+| `make eval-opensearch` | Avalia métricas (OpenSearch) |
+| `make inspect-emb` | Inspeciona embeddings |
+| `make quality` | Executa todos os checks de qualidade |
 
 ### 🧹 Consolidar dados para indexação
 

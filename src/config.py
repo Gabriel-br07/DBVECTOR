@@ -36,6 +36,21 @@ QUERY = os.getenv("QUERY", "direitos fundamentais")
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 
+# Validação de Dados
+MIN_CHARS = int(os.getenv("MIN_CHARS", "200"))
+VALIDATION_MAX_BAD_PCT = float(os.getenv("VALIDATION_MAX_BAD_PCT", "10"))
+
+# SLOs e Benchmarks
+SLO_P95_MS = float(os.getenv("SLO_P95_MS", "200"))
+MAX_BUILD_TIME_S = float(os.getenv("MAX_BUILD_TIME_S", "60"))
+
+# Thresholds de Avaliação de Recuperação
+MIN_P5 = float(os.getenv("MIN_P5", "0.55"))
+MIN_NDCG5 = float(os.getenv("MIN_NDCG5", "0.70"))
+
+# Inspeção de Embeddings
+NEAR_DUPES_MAX_PCT = float(os.getenv("NEAR_DUPES_MAX_PCT", "1"))
+
 def get_opensearch_config() -> dict:
     """Retorna configuração para cliente OpenSearch."""
     config = {
