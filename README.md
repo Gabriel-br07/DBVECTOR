@@ -26,39 +26,135 @@ Este projeto oferece uma infraestrutura completa de RAG jurídico com:
 
 ## 📋 Pré-requisitos
 
-- **Python 3.10+**
-- **Poetry** (gerenciador de dependências Python)
-- **Docker** (opcional, para OpenSearch)
+### Opção 1: Conda (Recomendado - com suporte GPU)
+- **Conda** ou **Miniconda**
+- **Driver NVIDIA** compatível com CUDA 12.1+ (para GPU)
 - **Git**
 
-### Instalação do Poetry
+### Opção 2: Poetry (Alternativa - CPU apenas)
+- **Python 3.10+**
+- **Poetry** (gerenciador de dependências Python)
+- **Git**
+
+### Instalação do Conda
 
 ```bash
-# Windows (PowerShell)
-(Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
+# Windows
+# Baixe Miniconda: https://docs.conda.io/en/latest/miniconda.html
+# Execute o instalador e siga instruções
 
-# Linux/Mac
-curl -sSL https://install.python-poetry.org | python3 -
+# Linux
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
 
-# Ou via pip (alternativa)
-pip install poetry
+# Mac
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+bash Miniconda3-latest-MacOSX-x86_64.sh
+```
+
+### Verificação de GPU (opcional)
+
+```bash
+# Verificar driver NVIDIA
+nvidia-smi
+
+# Verificar versão do driver (deve suportar CUDA 12.1+)
+# Driver >= 530 para Linux
+# Driver >= 531 para Windows
 ```
 
 ## 🚀 Instalação Rápida
 
-### 1. Clone e Configure
+### ⚡ Atalho Windows (PowerShell)
+
+**Setup automático:**
+```powershell
+# 1. Setup (detecta Conda/Poetry/pip e instala)
+.\setup.ps1
+
+# 2. Build do índice
+.\build.ps1
+
+# 3. Iniciar API
+.\run-api.ps1
+
+# 4. Testar (em outro terminal)
+.\test-api.ps1
+```
+
+---
+
+### Opção 1: Conda (Recomendado)
+
+#### Instalação GPU (com aceleração FAISS)
+
+```bash
+# Clone o repositório
+git clone <repo-url>
+cd rag-juridico
+
+# Cria ambiente Conda com suporte GPU
+conda env create -f environment.gpu.yml
+
+# Ativa o ambiente
+conda activate rag-juridico
+
+# Valida que GPU está disponível
+python -c "import faiss; print('FAISS GPU disponível:', hasattr(faiss, 'StandardGpuResources'))"
+python -c "import torch; print('CUDA disponível:', torch.cuda.is_available())"
+
+# Habilita GPU no runtime
+# Windows PowerShell
+$env:USE_FAISS_GPU="true"
+$env:FAISS_GPU_DEVICE="0"
+
+# Linux/Mac
+export USE_FAISS_GPU=true
+export FAISS_GPU_DEVICE=0
+
+# Indexa documentos e inicia API
+make faiss-build CONDA_ENV=rag-juridico
+make api CONDA_ENV=rag-juridico
+```
+
+#### Instalação CPU (sem GPU)
+
+```bash
+# Clone o repositório
+git clone <repo-url>
+cd rag-juridico
+
+# Cria ambiente Conda CPU
+conda env create -f environment.cpu.yml
+
+# Ativa o ambiente
+conda activate rag-juridico-cpu
+
+# Garante que GPU está desabilitado
+# Windows PowerShell
+$env:USE_FAISS_GPU="false"
+
+# Linux/Mac
+export USE_FAISS_GPU=false
+
+# Indexa documentos e inicia API
+make faiss-build CONDA_ENV=rag-juridico-cpu
+make api CONDA_ENV=rag-juridico-cpu
+```
+
+### Opção 2: Poetry (CPU apenas)
 
 ```bash
 git clone <repo-url>
 cd rag-juridico
 
-# Opção 1: Poetry (recomendado)
+# Instala com Poetry
 poetry install
 
 # Ativa ambiente virtual
 poetry shell
 
-# Opção 2: Fallback pip (se Poetry falhar no Windows)
+# Fallback pip (se Poetry falhar no Windows)
 python -m venv venv
 # Windows: venv\Scripts\activate
 # Linux/Mac: source venv/bin/activate
@@ -66,34 +162,51 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
-> **📝 Nota Windows**: Se Poetry falhar por falta de compiladores (Visual Studio Build Tools), use o fallback pip. Veja [INSTALL.md](INSTALL.md) para detalhes.
+> **📝 Nota Windows GPU**: Em Windows, recomenda-se usar **WSL2** com drivers CUDA para WSL para melhor compatibilidade GPU. Veja [DEPLOY_CONDA.md](DEPLOY_CONDA.md) para detalhes.
+
+> **📝 Nota Poetry**: Poetry não tem suporte nativo a FAISS GPU. Use Conda para habilitar GPU.
 
 ### 2. Configuração
 
 ```bash
-# Cria arquivo de configuração
+# Cria arquivo de configuração (opcional - tem valores padrão)
 cp .env.example .env
+
+# Para habilitar GPU (apenas com ambiente Conda GPU)
+echo "USE_FAISS_GPU=true" >> .env
+echo "FAISS_GPU_DEVICE=0" >> .env
 
 # Edite .env se necessário (valores padrão funcionam para desenvolvimento)
 ```
 
-### 3. Setup FAISS (Recomendado para início)
+### 3. Setup e Execução
 
 ```bash
-# Indexa documentos dummy
+# Com Conda (ajuste CONDA_ENV conforme seu ambiente)
+make faiss-build CONDA_ENV=rag-juridico
+make faiss-query CONDA_ENV=rag-juridico
+make api CONDA_ENV=rag-juridico
+
+# Com Poetry
 make faiss-build
-# ou: poetry run python -m src.pipelines.build_faiss
-
-# Testa busca via pipeline
 make faiss-query
-# ou: poetry run python -m src.pipelines.query_faiss
-
-# Inicia API
 make api
-# ou: poetry run uvicorn src.api.main:app --reload --port 8000
 ```
 
 Pronto! Acesse http://localhost:8000/docs para documentação interativa.
+
+### Verificação Rápida (Sanity Check)
+
+```bash
+# Verifica configuração GPU/CPU
+make sanity
+
+# Saída esperada:
+# === Verificação de Sanidade ===
+# GPU disponível no FAISS?
+# USE_FAISS_GPU = true (ou false)
+# GPU symbols = True (ou False)
+```
 
 ## ⚙️ Configuração (.env)
 
@@ -109,6 +222,10 @@ NORMALIZE_EMBEDDINGS=true
 # FAISS (backend local)
 FAISS_INDEX_PATH=data/indexes/faiss
 FAISS_METADATA_PATH=data/indexes/faiss/metadata.parquet
+
+# FAISS GPU (requer ambiente Conda GPU)
+USE_FAISS_GPU=false         # true para habilitar GPU
+FAISS_GPU_DEVICE=0          # ID da GPU (0, 1, 2, etc.)
 
 # OpenSearch (backend distribuído) 
 OPENSEARCH_HOST=localhost
@@ -171,6 +288,8 @@ make api
 
 | Comando | Descrição |
 |---------|-----------|
+| `make env-gpu` | Cria ambiente Conda com suporte GPU |
+| `make env-cpu` | Cria ambiente Conda CPU |
 | `make install` | Instala dependências com Poetry |
 | `make shell` | Ativa ambiente virtual Poetry |
 | `make format` | Formata código (black + isort) |
@@ -192,7 +311,17 @@ make api
 | `make eval-opensearch` | Avalia recuperação (OpenSearch) |
 | `make inspect-emb` | Inspeciona embeddings |
 | `make quality` | Workflow completo de qualidade |
+| `make sanity` | Verifica GPU/CPU e configuração |
 | `make demo` | Script de demonstração |
+
+**Nota:** Comandos Makefile usam `conda run` por padrão. Especifique o ambiente:
+```bash
+# Exemplo com ambiente GPU
+make test CONDA_ENV=rag-juridico
+
+# Exemplo com ambiente CPU
+make test CONDA_ENV=rag-juridico-cpu
+```
 
 ## 🧪 Testes
 
@@ -699,7 +828,6 @@ Busca documentos por similaridade semântica.
 - `GET /` - Informações da API
 - `GET /health` - Health check
 - `GET /docs` - Documentação Swagger
-- `GET /redoc` - Documentação ReDoc
 
 ## � Gerenciamento de Dependências com Poetry
 
@@ -747,26 +875,113 @@ poetry export --with dev -f requirements.txt --output requirements-dev.txt
 - **Build e publicação** de pacotes Python
 - **Configuração unificada** em `pyproject.toml`
 
-## �🐛 Troubleshooting
+## 🐛 Troubleshooting
 
 ### FAISS
 
 **Erro: "No module named 'faiss'"**
 ```bash
+# Com Conda
+conda activate rag-juridico
+conda list | grep faiss
+
+# Com Poetry
 poetry add faiss-cpu
 ```
 
-**Erro: "Poetry not found"**
+**Erro: FAISS GPU não funciona**
 ```bash
-# Instale Poetry primeiro
-curl -sSL https://install.python-poetry.org | python3 -
-# ou: pip install poetry
+# 1. Verificar símbolos GPU
+python -c "import faiss; print('GPU:', hasattr(faiss, 'StandardGpuResources'))"
+
+# 2. Se False, verificar instalação
+conda list | grep faiss
+# Deve mostrar faiss-gpu (não faiss-cpu)
+
+# 3. Verificar CUDA
+python -c "import torch; print('CUDA:', torch.version.cuda)"
+# Deve mostrar 12.1
+
+# 4. Verificar driver
+nvidia-smi
+# Driver deve ser >= 530 (Linux) ou >= 531 (Windows)
+
+# 5. Reinstalar ambiente
+conda env remove -n rag-juridico
+make env-gpu
 ```
 
 **Erro: "Index file not found"**
 ```bash
 make faiss-build  # Reconstrói índice
 ```
+
+**Erro: Memória GPU esgotada**
+```bash
+# 1. Verificar uso
+nvidia-smi
+
+# 2. Liberar memória
+python -c "import torch; torch.cuda.empty_cache()"
+
+# 3. Usar CPU como fallback
+# Windows PowerShell
+$env:USE_FAISS_GPU="false"
+
+# Linux/Mac
+export USE_FAISS_GPU=false
+
+make faiss-build
+```
+
+### Conda
+
+**Erro: "conda: command not found"**
+```bash
+# Reinstale Miniconda
+# https://docs.conda.io/en/latest/miniconda.html
+```
+
+**Erro: Ambiente Conda muito lento**
+```bash
+# Use mamba (mais rápido)
+conda install -n base -c conda-forge mamba
+mamba env create -f environment.gpu.yml
+```
+
+**Conflito de dependências**
+```bash
+# Limpa cache e recria
+conda clean --all
+conda env remove -n rag-juridico
+make env-gpu
+```
+
+### Windows GPU
+
+**GPU não funciona no Windows nativo**
+
+Para GPU no Windows, recomenda-se **WSL2**:
+
+```powershell
+# 1. Instalar WSL2
+wsl --install
+
+# 2. Instalar driver CUDA para WSL
+# Baixe de: https://developer.nvidia.com/cuda/wsl
+
+# 3. No WSL, verificar
+nvidia-smi
+
+# 4. Instalar Miniconda no WSL
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
+
+# 5. Criar ambiente GPU no WSL
+conda env create -f environment.gpu.yml
+```
+
+Veja [DEPLOY_CONDA.md](DEPLOY_CONDA.md) para guia completo WSL2.
 
 ### OpenSearch
 

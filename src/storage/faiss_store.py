@@ -2,6 +2,7 @@
 Store FAISS para busca vetorial local.
 """
 import os
+import logging
 import faiss
 import numpy as np
 import pandas as pd
@@ -11,6 +12,36 @@ from pathlib import Path
 from src.storage.base import VectorStore
 from src.schema import Doc, SearchResult
 from src import embeddings, config
+
+log = logging.getLogger(__name__)
+
+
+def _gpu_available():
+    """Verifica se FAISS tem suporte a GPU."""
+    return hasattr(faiss, "StandardGpuResources")
+
+
+def maybe_to_gpu(index):
+    """
+    Move índice FAISS para GPU se configurado e disponível.
+    Fallback automático para CPU se houver erro ou GPU não disponível.
+    """
+    if not config.USE_FAISS_GPU:
+        log.info("FAISS GPU desabilitado via config (USE_FAISS_GPU=false)")
+        return index
+    
+    if not _gpu_available():
+        log.warning("FAISS GPU não disponível nesta build; usando CPU.")
+        return index
+    
+    try:
+        res = faiss.StandardGpuResources()
+        gpu_index = faiss.index_cpu_to_gpu(res, config.FAISS_GPU_DEVICE, index)
+        log.info("FAISS index movido para GPU (device %d).", config.FAISS_GPU_DEVICE)
+        return gpu_index
+    except Exception as e:
+        log.warning("Falha ao mover índice para GPU (%s); usando CPU.", e)
+        return index
 
 
 class FAISSStore(VectorStore):
@@ -40,10 +71,21 @@ class FAISSStore(VectorStore):
         if os.path.exists(index_file):
             print(f"📁 Carregando índice FAISS: {index_file}")
             self._index = faiss.read_index(index_file)
+            
+            # Move para GPU se configurado
+            self._index = maybe_to_gpu(self._index)
 
             # Carrega metadados
             if os.path.exists(self.metadata_path):
                 df = pd.read_parquet(self.metadata_path)
+                
+                # Converte meta de string JSON de volta para dict
+                if 'meta' in df.columns:
+                    import ast
+                    df['meta'] = df['meta'].apply(
+                        lambda x: ast.literal_eval(x) if x and isinstance(x, str) else {}
+                    )
+                
                 self.metadata = df.set_index('internal_id').to_dict('index')
                 print(f"✅ Índice carregado! {len(self.metadata)} documentos")
             else:
@@ -55,16 +97,27 @@ class FAISSStore(VectorStore):
         """Salva índice FAISS e metadados no disco."""
         if self._index is None:
             return
+        
+        # Se o índice estiver na GPU, move para CPU antes de salvar
+        index_to_save = self._index
+        if _gpu_available() and isinstance(self._index, faiss.GpuIndex):
+            log.info("Movendo índice de GPU para CPU antes de salvar...")
+            index_to_save = faiss.index_gpu_to_cpu(self._index)
             
         index_file = self._get_index_file()
         print(f"💾 Salvando índice FAISS: {index_file}")
-        faiss.write_index(self._index, index_file)
+        faiss.write_index(index_to_save, index_file)
 
         # Salva metadados
         if self.metadata:
             df = pd.DataFrame.from_dict(self.metadata, orient='index')
             df.index.name = 'internal_id'
             df.reset_index(inplace=True)
+            
+            # Converte meta dict para JSON string (PyArrow não suporta struct vazio)
+            if 'meta' in df.columns:
+                df['meta'] = df['meta'].apply(lambda x: str(x) if x else None)
+            
             df.to_parquet(self.metadata_path, index=False)
             print(f"💾 Metadados salvos: {self.metadata_path}")
     
@@ -92,6 +145,9 @@ class FAISSStore(VectorStore):
             base_index = faiss.IndexFlatIP(dimension)
             # Usa IndexIDMap2 para manter mapeamento de IDs
             self._index = faiss.IndexIDMap2(base_index)
+            
+            # Move para GPU se configurado
+            self._index = maybe_to_gpu(self._index)
 
         # Prepara IDs internos e metadados
         internal_ids = []

@@ -1,8 +1,19 @@
-.PHONY: install install-dev clean shell add add-dev update format lint demo
+.PHONY: env-gpu env-cpu install install-dev clean shell add add-dev update format lint demo
 .PHONY: faiss-build faiss-query os-up os-down os-logs os-build os-query api test test-cov data-merge
-.PHONY: data-validate bench bench-compare eval eval-opensearch inspect-emb quality
+.PHONY: data-validate bench bench-compare eval eval-opensearch inspect-emb quality sanity
 
-# Instalação
+# Conda environment
+CONDA_ENV ?= rag-juridico
+PYTHON    ?= python
+
+# Criação de ambientes Conda
+env-gpu:
+	conda env create -f environment.gpu.yml || conda env update -f environment.gpu.yml --prune
+
+env-cpu:
+	conda env create -f environment.cpu.yml || conda env update -f environment.cpu.yml --prune
+
+# Instalação (Poetry - mantido para compatibilidade)
 install:
 	poetry install
 
@@ -14,9 +25,8 @@ clean:
 	rm -rf data/indexes/faiss/*
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
-	poetry env info --path | xargs rm -rf
 
-# Ambiente virtual
+# Ambiente virtual (Poetry - mantido para compatibilidade)
 shell:
 	poetry shell
 
@@ -32,27 +42,27 @@ update:
 
 # Linting e formatação
 format:
-	poetry run black src/ tests/
-	poetry run isort src/ tests/
+	conda run -n $(CONDA_ENV) black src/ tests/
+	conda run -n $(CONDA_ENV) isort src/ tests/
 
 lint:
-	poetry run black --check src/ tests/
-	poetry run isort --check-only src/ tests/
-	poetry run flake8 src/ tests/ --max-line-length=100 --ignore=E203,W503
+	conda run -n $(CONDA_ENV) black --check src/ tests/
+	conda run -n $(CONDA_ENV) isort --check-only src/ tests/
+	conda run -n $(CONDA_ENV) flake8 src/ tests/ --max-line-length=100 --ignore=E203,W503
 
 # Testes
 test:
-	poetry run pytest tests/ -v
+	conda run -n $(CONDA_ENV) pytest tests/ -v
 
 test-cov:
-	poetry run pytest tests/ --cov=src --cov-report=html --cov-report=term-missing
+	conda run -n $(CONDA_ENV) pytest tests/ --cov=src --cov-report=html --cov-report=term-missing
 
 # FAISS workflows
 faiss-build:
-	poetry run python -m src.pipelines.build_faiss
+	conda run -n $(CONDA_ENV) $(PYTHON) -m src.pipelines.build_faiss
 
 faiss-query:
-	poetry run python -m src.pipelines.query_faiss
+	conda run -n $(CONDA_ENV) $(PYTHON) -m src.pipelines.query_faiss
 
 # OpenSearch workflows
 os-up:
@@ -65,21 +75,21 @@ os-logs:
 	docker-compose logs -f opensearch
 
 os-build:
-	poetry run python -m src.pipelines.build_opensearch
+	conda run -n $(CONDA_ENV) $(PYTHON) -m src.pipelines.build_opensearch
 
 os-query:
-	poetry run python -m src.pipelines.query_opensearch
+	conda run -n $(CONDA_ENV) $(PYTHON) -m src.pipelines.query_opensearch
 
 # API
 api:
-	poetry run uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+	conda run -n $(CONDA_ENV) uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
 
 # Workflow completo FAISS
-setup-faiss: install faiss-build
+setup-faiss: faiss-build
 	@echo "✅ Setup FAISS completo! Execute 'make api' para iniciar a API"
 
 # Workflow completo OpenSearch  
-setup-opensearch: install os-up
+setup-opensearch: os-up
 	@echo "⏳ Aguardando OpenSearch inicializar..."
 	@sleep 15
 	$(MAKE) os-build
@@ -87,34 +97,40 @@ setup-opensearch: install os-up
 
 # Demo rápido
 demo:
-	poetry run python demo.py
+	conda run -n $(CONDA_ENV) $(PYTHON) demo.py
 
 # Tratando os dados
 data-merge:
-	poetry run python -m src.tools.tratamento_dados --input data/indexes/faiss --output data/merged_clean.jsonl --dedupe-by case_number
+	conda run -n $(CONDA_ENV) $(PYTHON) -m src.tools.tratamento_dados --input data/indexes/faiss --output data/merged_clean.jsonl --dedupe-by case_number
 
 # Validação de dados
 data-validate:
-	poetry run python -m src.tools.validate_data --input data/merged_clean.jsonl --report reports/validation/report.json
+	conda run -n $(CONDA_ENV) $(PYTHON) -m src.tools.validate_data --input data/merged_clean.jsonl --report reports/validation/report.json
 
 # Benchmarks
 bench:
-	poetry run pytest tests/bench --benchmark-save=baseline
+	conda run -n $(CONDA_ENV) pytest tests/bench --benchmark-only --benchmark-save=baseline
 
 bench-compare:
-	poetry run pytest tests/bench --benchmark-compare
+	conda run -n $(CONDA_ENV) pytest tests/bench --benchmark-only --benchmark-compare
 
 # Avaliação de recuperação
 eval:
-	poetry run python -m src.eval.retrieval_eval --qa data/eval/qa_dev.jsonl --k 5 --backend faiss --report reports/eval/retrieval_metrics.json --csv reports/eval/retrieval_metrics.csv
+	conda run -n $(CONDA_ENV) $(PYTHON) -m src.eval.retrieval_eval --qa data/eval/qa_dev.jsonl --k 5 --backend faiss --report reports/eval/retrieval_metrics.json --csv reports/eval/retrieval_metrics.csv
 
 eval-opensearch:
-	poetry run python -m src.eval.retrieval_eval --qa data/eval/qa_dev.jsonl --k 5 --backend opensearch --report reports/eval/retrieval_metrics_os.json --csv reports/eval/retrieval_metrics_os.csv
+	conda run -n $(CONDA_ENV) $(PYTHON) -m src.eval.retrieval_eval --qa data/eval/qa_dev.jsonl --k 5 --backend opensearch --report reports/eval/retrieval_metrics_os.json --csv reports/eval/retrieval_metrics_os.csv
 
 # Inspeção de embeddings
 inspect-emb:
-	poetry run python -m src.eval.inspect_embeddings --input data/merged_clean.jsonl --mode generate --report reports/inspect/embeddings_summary.json
+	conda run -n $(CONDA_ENV) $(PYTHON) -m src.eval.inspect_embeddings --input data/merged_clean.jsonl --mode generate --report reports/inspect/embeddings_summary.json
 
 # Workflow completo de qualidade
 quality: data-validate bench eval inspect-emb
 	@echo "✅ Todas as verificações de qualidade concluídas!"
+
+# Sanity checks
+sanity:
+	@echo "=== Verificação de Sanidade ==="
+	@echo "GPU disponível no FAISS?"
+	@conda run -n $(CONDA_ENV) $(PYTHON) -c "import faiss, os; print('USE_FAISS_GPU =', os.getenv('USE_FAISS_GPU', 'false')); print('GPU symbols =', hasattr(faiss, 'StandardGpuResources'))"

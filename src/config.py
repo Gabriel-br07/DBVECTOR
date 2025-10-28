@@ -21,6 +21,10 @@ NORMALIZE_EMBEDDINGS = os.getenv("NORMALIZE_EMBEDDINGS", "true").lower() == "tru
 FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH", "data/indexes/faiss")
 FAISS_METADATA_PATH = os.getenv("FAISS_METADATA_PATH", "data/indexes/faiss/metadata.parquet")
 
+# Configurações FAISS GPU
+USE_FAISS_GPU = os.getenv("USE_FAISS_GPU", "false").lower() in {"1", "true", "yes"}
+FAISS_GPU_DEVICE = int(os.getenv("FAISS_GPU_DEVICE", "0"))
+
 # Configurações OpenSearch
 OPENSEARCH_HOST = os.getenv("OPENSEARCH_HOST", "localhost")
 OPENSEARCH_PORT = int(os.getenv("OPENSEARCH_PORT", "9200"))
